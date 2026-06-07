@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Auto-starts whisper.cpp in server mode (warm STT) at login.
+     Template: __HOME__ is substituted by install_launchd.sh.
+     Adjust the binary path if whisper-server isn't under /opt/homebrew/bin. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.rocky.whisper</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/whisper-server</string>
+        <string>-m</string>
+        <string>__HOME__/.whisper/ggml-small.en.bin</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>8910</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/.whisper/whisper-server.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.whisper/whisper-server.err.log</string>
+</dict>
+</plist>
