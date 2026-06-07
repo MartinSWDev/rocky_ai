@@ -88,7 +88,13 @@ Visit `http://<pc-tailscale-ip>:7437/` for the status dashboard.
 
 ```bash
 python3 -m pip install -r requirements-client.txt
-brew install ffmpeg whisper-cpp        # whisper-cli + ffmpeg
+brew install ffmpeg whisper-cpp        # whisper-cli/server + ffmpeg
+
+# Whisper models (small.en for commands, tiny.en for the wake word):
+curl -L -o ~/.whisper/ggml-small.en.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin
+curl -L -o ~/.whisper/ggml-tiny.en.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin
 
 # Voice (rocky_say / Coqui XTTS) into its own venv:
 python3.11 -m venv ~/.rocky_say/venv
@@ -98,12 +104,16 @@ scripts/mac/start_rocky.sh             # text mode
 scripts/mac/start_rocky.sh --voice     # wake-word "Hey Rocky"
 ```
 
-Auto-start the TTS server (and optionally the voice client) at login:
+For the fastest transcription, run Whisper warm (see **Voice latency** below) and
+set `voice.whisper_server_url` in `config.yaml`.
+
+Auto-start agents at login (TTS, optional warm Whisper, optional voice client):
 
 ```bash
 chmod +x scripts/mac/*.sh
-scripts/mac/install_launchd.sh           # TTS server only
-scripts/mac/install_launchd.sh --client  # also auto-run the voice client
+scripts/mac/install_launchd.sh                    # TTS server only
+scripts/mac/install_launchd.sh --whisper          # + warm whisper.cpp server
+scripts/mac/install_launchd.sh --whisper --client # + auto-run the voice client
 ```
 
 ---
@@ -137,6 +147,42 @@ For coding, point **Cursor** at the same Ollama instance (OpenAI-compatible):
   ~3s per reply vs ~20s for the cold fallback.
 - The server is **pure standard library + PyYAML** and threaded, so it stays
   light on the always-on PC.
+
+---
+
+## Voice latency
+
+Spoken round-trip feels slow if you don't tune the client. The big levers, in
+impact order:
+
+1. **Recording stops when you stop talking.** `record_until_silence` uses an
+   energy gate (`voice.silence_rms` / `voice.silence_secs`) and ends the take
+   shortly after you go quiet, instead of always recording `record_secs`. If it
+   cuts you off, raise `silence_rms`; if it waits too long, lower it.
+2. **Use a small, warm Whisper model.** `small.en` is plenty for commands and
+   far faster than large-v3. Download it:
+   ```bash
+   curl -L -o ~/.whisper/ggml-small.en.bin \
+     https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin
+   ```
+   Then keep it loaded with a whisper.cpp server and point the client at it:
+   ```bash
+   brew install whisper-cpp
+   scripts/mac/start_whisper_server.sh            # or install the launchd agent
+   # config.yaml:  voice.whisper_server_url: "http://127.0.0.1:8910/inference"
+   ```
+3. **Streamed reply (`voice.stream: true`).** The reply is streamed and spoken
+   sentence-by-sentence (synth overlaps playback), so Rocky starts talking in
+   ~1–2s instead of after the whole answer is generated and synthesized.
+4. **Use a voice model that fits 100% in VRAM.** On a 16 GB GPU, `qwen3:30b-a3b`
+   (19 GB) spills ~26% to CPU (`ollama ps` shows the split) and, worse, gets
+   *evicted* whenever the 35B coding model loads — so the next voice query pays a
+   ~15–19s cold reload. A model that fits fully (e.g. `qwen3:8b`/`14b`, set
+   `ollama.voice_model`) stays resident → fast and consistent. Keep the big
+   model for Cursor.
+
+After editing `config.yaml` or `.env`, **restart the server** — it reads them
+once at startup and does not hot-reload.
 
 ---
 
