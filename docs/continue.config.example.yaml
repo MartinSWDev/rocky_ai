@@ -1,0 +1,54 @@
+# Continue (continue.dev) config for using Rocky's local Ollama models in an IDE.
+# Copy to ~/.continue/config.yaml on the Mac and set apiBase to your PC's
+# Tailscale IP. Continue calls Ollama DIRECTLY from the Mac over Tailscale, so
+# nothing leaves your network (unlike Cursor's native chat, which proxies through
+# Cursor's cloud).
+#
+# IMPORTANT — use NON-REASONING models here. qwen3 ("thinking") models make
+# Continue truncate output after one word, because it doesn't strip the <think>
+# tag (even an empty one). qwen2.5 / qwen2.5-coder have no thinking, so they work
+# cleanly. Both below are ~4.7GB and fit fully in 16GB VRAM.
+#
+# On the PC:  ollama pull qwen2.5-coder:7b  &&  ollama pull qwen2.5:7b-instruct
+
+name: Rocky local
+version: 0.0.1
+schema: v1
+
+models:
+  # Coding chat / inline edit. Coder-tuned, clean output.
+  - name: Qwen2.5 Coder 7B (code)
+    provider: ollama
+    model: qwen2.5-coder:7b
+    apiBase: http://100.x.y.z:11434      # <-- your PC's Tailscale IP
+    roles:
+      - chat
+      - edit
+      - apply
+
+  # Agent mode / Jira via MCP. Non-reasoning AND does native tool-calls
+  # (qwen2.5-coder does NOT tool-call reliably, so use this one for the agent).
+  - name: Qwen2.5 7B (agent / Jira)
+    provider: ollama
+    model: qwen2.5:7b-instruct
+    apiBase: http://100.x.y.z:11434      # <-- your PC's Tailscale IP
+    capabilities:
+      - tool_use
+    roles:
+      - chat
+
+mcpServers:
+  # Atlassian Rovo MCP — reads Jira/Confluence. First run opens a browser to log
+  # in (OAuth). The "resources/templates ... -32601" log is harmless: the server
+  # only exposes tools, not resources.
+  - name: Atlassian Rovo
+    command: npx
+    args:
+      - "-y"
+      - "mcp-remote@latest"
+      - "https://mcp.atlassian.com/v1/mcp/authv2"
+
+# Usage:
+#   - Coding: pick "Qwen2.5 Coder 7B (code)".
+#   - Jira:   switch to Agent mode, pick "Qwen2.5 7B (agent / Jira)", then ask
+#             e.g. "Get Jira issue PROJ-123".
