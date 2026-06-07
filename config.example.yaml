@@ -60,6 +60,7 @@ jira:
   url: "https://your-domain.atlassian.net"
   # username + token come from .env: JIRA_USERNAME, JIRA_API_TOKEN
   max_results: 10
+  description_chars: 1500         # how much of a ticket's description to feed the model
   # Words that trigger an automatic "list my tickets" lookup.
   keywords:
     - ticket

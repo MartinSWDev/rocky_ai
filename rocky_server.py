@@ -57,6 +57,7 @@ JIRA_USER     = os.environ.get("JIRA_USERNAME", "")
 JIRA_TOKEN    = os.environ.get("JIRA_API_TOKEN", "")
 JIRA_MAX      = CFG.get("jira.max_results", 10)
 TICKET_KEYWORDS = set(CFG.get("jira.keywords", []))
+JIRA_DESC_CHARS = CFG.get("jira.description_chars", 1500)
 
 MEM_ENABLED   = CFG.get("memory.enabled", True)
 MEM_MAX_TURNS = CFG.get("memory.max_turns", 12)
@@ -179,6 +180,29 @@ def fetch_jira_tickets() -> str:
         return f"Jira fetch error: {exc}"
 
 
+def _adf_text(node) -> str:
+    """Recursively pull plain text out of Atlassian Document Format.
+
+    The old two-level walk dropped anything in lists, tables, panels, etc. —
+    which is exactly where 'what to do' (acceptance criteria) usually lives.
+    """
+    if isinstance(node, list):
+        return "".join(_adf_text(n) for n in node)
+    if not isinstance(node, dict):
+        return ""
+    ntype = node.get("type")
+    if ntype == "text":
+        return node.get("text", "")
+    if ntype == "hardBreak":
+        return "\n"
+    inner = "".join(_adf_text(c) for c in node.get("content", []))
+    if ntype == "listItem":
+        return "- " + inner.strip() + "\n"
+    if ntype in ("paragraph", "heading", "tableRow", "codeBlock", "blockquote"):
+        return inner + "\n"
+    return inner
+
+
 def fetch_jira_ticket(ticket_key: str) -> str:
     if not _jira_ready():
         return "Jira credentials not configured."
@@ -186,18 +210,14 @@ def fetch_jira_ticket(ticket_key: str) -> str:
     try:
         resp = urllib.request.urlopen(urllib.request.Request(url, headers=_jira_headers()), timeout=10)
         fields = json.loads(resp.read())["fields"]
-        description = ""
-        desc = fields.get("description")
-        if isinstance(desc, dict):
-            for block in desc.get("content", []):
-                for inline in block.get("content", []):
-                    if inline.get("type") == "text":
-                        description += inline.get("text", "") + " "
+        description = _adf_text(fields.get("description")).strip()
+        if not description:
+            description = "(no description)"
         return (
             f"{ticket_key} [{fields.get('priority', {}).get('name', '?')}] "
             f"({fields['status']['name']})\n"
             f"Summary: {fields['summary']}\n"
-            f"Description: {description[:500]}"
+            f"Description: {description[:JIRA_DESC_CHARS]}"
         )
     except Exception as exc:
         LOG.error("Jira fetch %s error: %s", ticket_key, exc)
@@ -294,12 +314,56 @@ def ask_ollama_stream(query: str, jira_context: str = ""):
     _record(query, "".join(parts).strip())
 
 
+_PROJECT_KEYS = None
+
+
+def _project_keys() -> set:
+    """Real project keys (e.g. PROJ, ABC), fetched once and cached.
+
+    Used to recover ticket refs from sloppy/voice input like 'PROJ 123'.
+    """
+    global _PROJECT_KEYS
+    if _PROJECT_KEYS is not None:
+        return _PROJECT_KEYS
+    keys = set()
+    if _jira_ready():
+        start = 0
+        try:
+            while True:                    # paginate — instances can have >100 projects
+                url = f"{JIRA_URL}/rest/api/3/project/search?maxResults=100&startAt={start}"
+                resp = urllib.request.urlopen(urllib.request.Request(url, headers=_jira_headers()), timeout=10)
+                data = json.loads(resp.read())
+                vals = data.get("values", [])
+                keys.update(p.get("key", "").upper() for p in vals if p.get("key"))
+                if data.get("isLast") or not vals:
+                    break
+                start += len(vals)
+            LOG.info("Loaded %d Jira project keys", len(keys))
+        except Exception as exc:
+            LOG.warning("project key fetch failed: %s", exc)
+    _PROJECT_KEYS = keys
+    return keys
+
+
+def _resolve_ticket_refs(query: str) -> set:
+    """Find ticket refs, tolerating spaces/case/missing hyphen from voice STT."""
+    refs = set(re.findall(r"\b[A-Z]+-\d+\b", query.upper()))   # strict form (typed)
+    # Fuzzy: squash to letters+digits and look for <projectkey><number>, so
+    # 'PROJ 123', 'proj 560', 'PROJ123' all resolve to PROJ-123.
+    squashed = re.sub(r"[^a-z0-9]", "", query.lower())
+    for key in _project_keys():
+        for m in re.finditer(re.escape(key.lower()) + r"(\d{1,6})", squashed):
+            refs.add(f"{key}-{m.group(1)}")
+    return refs
+
+
 def _maybe_jira(query: str) -> str:
     if not JIRA_ENABLED:
         return ""
-    ticket_refs = re.findall(r"\b[A-Z]+-\d+\b", query)
-    if ticket_refs:
-        return "\n\n".join(fetch_jira_ticket(ref) for ref in ticket_refs)
+    refs = _resolve_ticket_refs(query)
+    if refs:
+        LOG.info("  -> Fetching ticket(s): %s", ", ".join(sorted(refs)))
+        return "\n\n".join(fetch_jira_ticket(ref) for ref in sorted(refs))
     if any(k in query.lower() for k in TICKET_KEYWORDS):
         LOG.info("  -> Fetching Jira tickets...")
         return fetch_jira_tickets()
