@@ -34,7 +34,7 @@ from config import expand, load_config
 CFG = load_config()
 
 OLLAMA_HOST   = CFG.get("ollama.host", "http://localhost:11434")
-MODEL         = CFG.get("ollama.voice_model", "qwen3:30b-a3b")
+MODEL         = CFG.get("ollama.voice_model", "qwen3:8b")  # default fits 16GB VRAM
 TEMPERATURE   = CFG.get("ollama.temperature", 0.7)
 NUM_CTX       = CFG.get("ollama.num_ctx", 8192)
 KEEP_ALIVE    = CFG.get("ollama.keep_alive", "30m")
