@@ -1,0 +1,22 @@
+# Secrets & local config
+.env
+config.yaml
+
+# Logs & runtime state
+logs/
+*.log
+.rocky_memory.jsonl
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.rocky_say/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
