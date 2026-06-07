@@ -203,7 +203,7 @@ def fetch_jira_ticket(ticket_key: str) -> str:
 
 
 # ── Ollama ───────────────────────────────────────────────────────────────────
-def ask_ollama(query: str, jira_context: str = "") -> str:
+def _build_system(jira_context: str) -> str:
     system = SYSTEM_PROMPT
     if jira_context:
         # Mark live data as authoritative so stale "no tickets" turns in memory
@@ -213,50 +213,109 @@ def ask_ollama(query: str, jira_context: str = "") -> str:
             "anything said earlier in this conversation; earlier replies may be "
             f"out of date.\n{jira_context}"
         )
+    return system
 
+
+def _build_messages(system: str, query: str) -> list:
     messages = [{"role": "system", "content": system}]
     if MEMORY:
         messages.extend(MEMORY.messages())
     messages.append({"role": "user", "content": query})
+    return messages
 
-    payload = json.dumps({
+
+def _record(query: str, answer: str) -> None:
+    if MEMORY:
+        MEMORY.add("user", query)
+        MEMORY.add("assistant", answer)
+    RECENT.append({
+        "t": time.strftime("%H:%M:%S"),
+        "q": (query[:80] + "…") if len(query) > 80 else query,
+        "a": (answer[:80] + "…") if len(answer) > 80 else answer,
+    })
+
+
+def _ollama_payload(query: str, jira_context: str, stream: bool) -> bytes:
+    return json.dumps({
         "model": MODEL,
-        "messages": messages,
-        "stream": False,
+        "messages": _build_messages(_build_system(jira_context), query),
+        "stream": stream,
         "keep_alive": KEEP_ALIVE,
         "options": {"temperature": TEMPERATURE, "num_ctx": NUM_CTX},
     }).encode()
 
+
+def ask_ollama(query: str, jira_context: str = "") -> str:
     req = urllib.request.Request(
         f"{OLLAMA_HOST}/api/chat",
-        data=payload,
+        data=_ollama_payload(query, jira_context, False),
         headers={"Content-Type": "application/json"},
     )
     resp = urllib.request.urlopen(req, timeout=REQ_TIMEOUT)
     answer = json.loads(resp.read())["message"]["content"].strip()
-
-    if MEMORY:
-        MEMORY.add("user", query)
-        MEMORY.add("assistant", answer)
+    _record(query, answer)
     return answer
 
 
+def ask_ollama_stream(query: str, jira_context: str = ""):
+    """Yield response text as Ollama produces it; record the full answer at end.
+
+    Lets the client start speaking the first sentence while the rest is still
+    generating — the single biggest win for perceived voice latency.
+    """
+    req = urllib.request.Request(
+        f"{OLLAMA_HOST}/api/chat",
+        data=_ollama_payload(query, jira_context, True),
+        headers={"Content-Type": "application/json"},
+    )
+    resp = urllib.request.urlopen(req, timeout=REQ_TIMEOUT)
+    parts = []
+    for raw in resp:                       # Ollama streams newline-delimited JSON
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            obj = json.loads(raw)
+        except Exception:
+            continue
+        chunk = obj.get("message", {}).get("content", "")
+        if chunk:
+            parts.append(chunk)
+            yield chunk
+        if obj.get("done"):
+            break
+    _record(query, "".join(parts).strip())
+
+
+def _maybe_jira(query: str) -> str:
+    if not JIRA_ENABLED:
+        return ""
+    ticket_refs = re.findall(r"\b[A-Z]+-\d+\b", query)
+    if ticket_refs:
+        return "\n\n".join(fetch_jira_ticket(ref) for ref in ticket_refs)
+    if any(k in query.lower() for k in TICKET_KEYWORDS):
+        LOG.info("  -> Fetching Jira tickets...")
+        return fetch_jira_tickets()
+    return ""
+
+
+def _is_forget(query: str) -> bool:
+    return query.lower().strip() in ("forget", "reset memory", "clear memory")
+
+
 def process_query(query: str) -> str:
-    # Memory controls.
-    if query.lower().strip() in ("forget", "reset memory", "clear memory") and MEMORY:
+    if _is_forget(query) and MEMORY:
         MEMORY.clear()
         return "Memory cleared. Fresh start fresh start."
+    return ask_ollama(query, _maybe_jira(query))
 
-    jira_context = ""
-    if JIRA_ENABLED:
-        ticket_refs = re.findall(r"\b[A-Z]+-\d+\b", query)
-        if ticket_refs:
-            jira_context = "\n\n".join(fetch_jira_ticket(ref) for ref in ticket_refs)
-        elif any(k in query.lower() for k in TICKET_KEYWORDS):
-            LOG.info("  -> Fetching Jira tickets...")
-            jira_context = fetch_jira_tickets()
 
-    return ask_ollama(query, jira_context)
+def process_query_stream(query: str):
+    if _is_forget(query) and MEMORY:
+        MEMORY.clear()
+        yield "Memory cleared. Fresh start fresh start."
+        return
+    yield from ask_ollama_stream(query, _maybe_jira(query))
 
 
 # ── HTTP ─────────────────────────────────────────────────────────────────────
@@ -329,8 +388,11 @@ class RockyHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         body = self.rfile.read(length).decode()
+        stream = False
         try:
-            query = json.loads(body).get("query", "").strip()
+            data = json.loads(body)
+            query = data.get("query", "").strip()
+            stream = bool(data.get("stream"))
         except Exception:
             query = body.strip()
 
@@ -340,18 +402,33 @@ class RockyHandler(BaseHTTPRequestHandler):
             return
 
         LOG.info("Query: %s", query)
+
+        if stream:
+            # Newline-delimited JSON: one {"chunk": "..."} per token batch.
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson")
+            self.end_headers()
+            parts = []
+            try:
+                for chunk in process_query_stream(query):
+                    parts.append(chunk)
+                    self.wfile.write((json.dumps({"chunk": chunk}) + "\n").encode())
+                    self.wfile.flush()
+            except Exception as exc:
+                LOG.exception("stream failed")
+                try:
+                    self.wfile.write((json.dumps({"chunk": f"Error: {exc}"}) + "\n").encode())
+                except Exception:
+                    pass
+            LOG.info("Rocky (stream): %s", "".join(parts))
+            return
+
         try:
             response = process_query(query)
             LOG.info("Rocky: %s", response)
         except Exception as exc:
             response = f"Error: {exc}"
             LOG.exception("process_query failed")
-
-        RECENT.append({
-            "t": time.strftime("%H:%M:%S"),
-            "q": (query[:80] + "…") if len(query) > 80 else query,
-            "a": (response[:80] + "…") if len(response) > 80 else response,
-        })
         self._send_json(200, {"response": response})
 
     def do_GET(self):
