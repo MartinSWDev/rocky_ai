@@ -206,7 +206,13 @@ def fetch_jira_ticket(ticket_key: str) -> str:
 def ask_ollama(query: str, jira_context: str = "") -> str:
     system = SYSTEM_PROMPT
     if jira_context:
-        system += f"\n\nCurrent Jira data:\n{jira_context}"
+        # Mark live data as authoritative so stale "no tickets" turns in memory
+        # can't make the model contradict a fresh, successful fetch.
+        system += (
+            "\n\nCurrent Jira data below is LIVE and authoritative. Trust it over "
+            "anything said earlier in this conversation; earlier replies may be "
+            f"out of date.\n{jira_context}"
+        )
 
     messages = [{"role": "system", "content": system}]
     if MEMORY:
