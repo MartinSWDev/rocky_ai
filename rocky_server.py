@@ -64,7 +64,9 @@ MEM_PATH      = Path(expand(CFG.get("memory.store_path", ".rocky_memory.jsonl"))
 
 DASH_ENABLED  = CFG.get("dashboard.enabled", True)
 
-SYSTEM_PROMPT = (("/no_think\n" if NO_THINK else "") + PERSONA.format(user=USER_NAME)).strip()
+# NB: the `/no_think` prompt token is ignored by qwen3 in Ollama — thinking is
+# actually disabled via the `think: false` API param in _ollama_payload().
+SYSTEM_PROMPT = PERSONA.format(user=USER_NAME).strip()
 
 # ── logging ──────────────────────────────────────────────────────────────────
 def _setup_logging() -> logging.Logger:
@@ -236,13 +238,18 @@ def _record(query: str, answer: str) -> None:
 
 
 def _ollama_payload(query: str, jira_context: str, stream: bool) -> bytes:
-    return json.dumps({
+    body = {
         "model": MODEL,
         "messages": _build_messages(_build_system(jira_context), query),
         "stream": stream,
         "keep_alive": KEEP_ALIVE,
         "options": {"temperature": TEMPERATURE, "num_ctx": NUM_CTX},
-    }).encode()
+    }
+    if NO_THINK:
+        # The decisive latency fix: skips qwen3's chain-of-thought (hundreds of
+        # tokens) and emits only the spoken answer (~10-20 tokens).
+        body["think"] = False
+    return json.dumps(body).encode()
 
 
 def ask_ollama(query: str, jira_context: str = "") -> str:

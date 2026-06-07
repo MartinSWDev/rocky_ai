@@ -24,7 +24,10 @@ network:
 
 ollama:
   host: "http://localhost:11434"
-  voice_model: "qwen3:30b-a3b"    # Rocky voice assistant
+  # Voice model: pick one that fits 100% in VRAM so it loads fast and isn't
+  # evicted by the coding model. On 16GB, qwen3:8b is a good balance; 30b-a3b
+  # spills to CPU and reloads slowly. Check the split with `ollama ps`.
+  voice_model: "qwen3:8b"
   coding_model: "qwen3.6:35b-a3b" # used by Cursor (see README), kept here for reference
   temperature: 0.7
   num_ctx: 8192
