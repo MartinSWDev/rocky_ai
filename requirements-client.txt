@@ -1,0 +1,4 @@
+# Rocky voice client (Mac). The client itself only needs PyYAML; speech-to-text
+# (whisper-cli, ffmpeg) and text-to-speech (rocky_say) are external binaries —
+# see README and requirements-tts.txt.
+PyYAML>=6.0

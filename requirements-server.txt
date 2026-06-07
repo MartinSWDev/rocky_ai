@@ -1,0 +1,4 @@
+# Rocky server (PC / Windows). Everything else is the Python 3.11 standard
+# library — the server stays deliberately light. Ollama runs as a separate
+# Windows service.
+PyYAML>=6.0

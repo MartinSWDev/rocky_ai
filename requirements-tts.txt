@@ -1,0 +1,10 @@
+# Rocky's voice (rocky_say) — Coqui XTTS-v2. Install into a DEDICATED venv on
+# the Mac, e.g. ~/.rocky_say/venv. These versions are pinned because XTTS is
+# sensitive to the transformers/torch combination.
+#
+#   python3.11 -m venv ~/.rocky_say/venv
+#   ~/.rocky_say/venv/bin/pip install -r requirements-tts.txt
+TTS
+transformers==4.44.0
+torch==2.5.1
+torchaudio==2.5.1
