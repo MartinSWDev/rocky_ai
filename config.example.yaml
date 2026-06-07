@@ -1,0 +1,104 @@
+# Rocky configuration — copy to config.yaml and edit for each machine.
+# Secrets (Jira credentials) live in .env, NOT here.
+#
+#   cp config.example.yaml config.yaml
+#
+# The same file shape is used on the PC (server) and the Mac (client); each
+# side only reads the sections it needs.
+
+network:
+  # Tailscale IPs (from `tailscale ip -4` on each machine).
+  pc_tailscale_ip: "100.x.y.z"
+  mac_tailscale_ip: "100.x.y.w"
+  server_port: 7437
+  # PC listen address. "0.0.0.0" = all interfaces; rely on Tailscale + the
+  # Windows Firewall to keep 7437 off the public internet. For the strongest
+  # isolation set this to the PC's Tailscale IP so it ONLY accepts VPN traffic
+  # (note: Tailscale must be up before the server starts).
+  server_bind: "0.0.0.0"
+  # Optional shared secret for defense-in-depth on top of Tailscale. Leave empty
+  # to disable. PREFER setting it via the ROCKY_AUTH_TOKEN env var (.env) so it
+  # never lands in a committed config file. Both server and client must match.
+  auth_token: ""
+  max_body_bytes: 65536         # reject oversized POST bodies (basic DoS guard)
+
+ollama:
+  host: "http://localhost:11434"
+  voice_model: "qwen3:30b-a3b"    # Rocky voice assistant
+  coding_model: "qwen3.6:35b-a3b" # used by Cursor (see README), kept here for reference
+  temperature: 0.7
+  num_ctx: 8192
+  # Keep the model resident in VRAM between requests so replies stay fast.
+  # "30m" = unload 30 min after last use; "-1" = never unload (max speed, holds VRAM).
+  keep_alive: "30m"
+  request_timeout: 120
+
+rocky:
+  user_name: "User"
+  # qwen3 fast path: skip chain-of-thought for snappy spoken replies.
+  no_think: true
+  # Persona/system prompt. {user} is substituted with rocky.user_name.
+  persona: |
+    You are Rocky, the Eridian alien from Project Hail Mary.
+    You are talking to {user}. Use their name occasionally — naturally, not every sentence.
+    You help {user} with their work. You have access to their Jira tickets.
+    Speak in Rocky's style: drop articles (a, an, the), simplify grammar,
+    triple emphasis words (good good good, bad bad bad), add 'question?' to questions.
+    Keep answers brief and practical. No markdown, plain text only — this is spoken aloud.
+
+memory:
+  # Rolling conversation history so Rocky remembers context across turns/restarts.
+  enabled: true
+  max_turns: 12                   # how many recent user+assistant turns to keep in the prompt
+  store_path: ".rocky_memory.jsonl"
+
+jira:
+  enabled: true
+  url: "https://your-domain.atlassian.net"
+  # username + token come from .env: JIRA_USERNAME, JIRA_API_TOKEN
+  max_results: 10
+  # Words that trigger an automatic "list my tickets" lookup.
+  keywords:
+    - ticket
+    - jira
+    - issue
+    - sprint
+    - priority
+    - assigned
+    - todo
+    - task
+    - work
+    - backlog
+    - story
+    - bug
+    - feature
+    - epic
+
+logging:
+  level: "INFO"
+  file: "logs/rocky.log"
+  max_bytes: 1048576              # 1 MB per file
+  backup_count: 3
+
+dashboard:
+  # Tiny status page served at GET / on the server port.
+  enabled: true
+
+# ── Mac client / voice settings (ignored by the server) ──────────────────────
+voice:
+  whisper_bin: "/opt/homebrew/bin/whisper-cli"
+  whisper_model: "~/.whisper/ggml-base.en.bin"       # actually large-v3 (mislabelled)
+  whisper_wake_model: "~/.whisper/ggml-tiny.en.bin"  # fast wake-word model
+  record_secs: 10
+  silence_db: -30
+  silence_secs: 1.5
+  wake_words:
+    - "hey rocky"
+    - "hey, rocky"
+    - "hi rocky"
+    - "hello rocky"
+    - "okay rocky"
+  # rocky_say persistent TTS server (fast path, ~3s). Started by launchd on Mac.
+  tts_port: 59720
+  tts_reference: "~/.rocky_say/rocky_training_audio_scrubbed.wav"
+  tts_venv_python: "~/.rocky_say/venv/bin/python3"
