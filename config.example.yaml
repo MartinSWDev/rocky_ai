@@ -87,11 +87,18 @@ dashboard:
 # ── Mac client / voice settings (ignored by the server) ──────────────────────
 voice:
   whisper_bin: "/opt/homebrew/bin/whisper-cli"
-  whisper_model: "~/.whisper/ggml-base.en.bin"       # actually large-v3 (mislabelled)
+  # For spoken commands, small.en is far faster than large-v3 and accurate
+  # enough. Download: see README. (Old setups had large-v3 mislabelled as base.)
+  whisper_model: "~/.whisper/ggml-small.en.bin"
   whisper_wake_model: "~/.whisper/ggml-tiny.en.bin"  # fast wake-word model
-  record_secs: 10
-  silence_db: -30
-  silence_secs: 1.5
+  # Keep Whisper warm via a whisper.cpp server (no per-utterance model reload).
+  # Empty = use the whisper-cli binary (cold load each time). See scripts/mac.
+  whisper_server_url: ""          # e.g. "http://127.0.0.1:8910/inference"
+  # Stream Rocky's reply and speak it sentence-by-sentence (much lower latency).
+  stream: true
+  record_secs: 10                 # hard cap; recording stops early on silence
+  silence_secs: 1.5               # stop this long after you stop talking
+  silence_rms: 500                # loudness floor that counts as "speaking" (raise if it cuts you off, lower if it waits too long)
   wake_words:
     - "hey rocky"
     - "hey, rocky"
