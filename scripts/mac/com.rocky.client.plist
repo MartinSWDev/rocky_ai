@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Optional: auto-start the Rocky voice client (wake-word mode) at login.
+     Template: __HOME__ and __REPO__ are substituted by install_launchd.sh.
+     NOTE: macOS will prompt once for Microphone permission for the controlling
+     process; approve it or the client can't record. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.rocky.client</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>__REPO__/rocky_client.py</string>
+        <string>--voice</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO__</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/.rocky_say/client.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.rocky_say/client.err.log</string>
+</dict>
+</plist>
